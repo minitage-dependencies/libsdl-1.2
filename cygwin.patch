@@ -1,0 +1,175 @@
+Index: src/main/win32/SDL_win32_main.c
+===================================================================
+--- src/main/win32/SDL_win32_main.c	(revision 5319)
++++ src/main/win32/SDL_win32_main.c	(working copy)
+@@ -21,8 +21,10 @@
+ # define remove(x)	DeleteFile(x)
+ #else
+ # define DIR_SEPERATOR TEXT("/")
++#ifndef __CYGWIN__
+ # include <direct.h>
+ #endif
++#endif
+ 
+ /* Include the SDL main definition header */
+ #include "SDL.h"
+Index: src/video/x11/SDL_x11gl.c
+===================================================================
+--- src/video/x11/SDL_x11gl.c	(revision 5319)
++++ src/video/x11/SDL_x11gl.c	(working copy)
+@@ -35,6 +35,8 @@
+ #define DEFAULT_OPENGL	"libGL.so.3"
+ #elif defined(__OpenBSD__)
+ #define DEFAULT_OPENGL	"libGL.so.4.0"
++#elif defined(__CYGWIN__)
++#define DEFAULT_OPENGL	"cygGL-1.dll"
+ #else
+ #define DEFAULT_OPENGL	"libGL.so.1"
+ #endif
+Index: src/thread/win32/SDL_systhread.c
+===================================================================
+--- src/thread/win32/SDL_systhread.c	(revision 5319)
++++ src/thread/win32/SDL_systhread.c	(working copy)
+@@ -91,7 +91,7 @@
+ #else
+ int SDL_SYS_CreateThread(SDL_Thread *thread, void *args)
+ {
+-#ifdef _WIN32_WCE
++#if defined(_WIN32_WCE) || defined(__CYGWIN__)
+ 	pfnSDL_CurrentBeginThread pfnBeginThread = NULL;
+ 	pfnSDL_CurrentEndThread pfnEndThread = NULL;
+ #else
+Index: include/SDL_platform.h
+===================================================================
+--- include/SDL_platform.h	(revision 5319)
++++ include/SDL_platform.h	(working copy)
+@@ -43,6 +43,10 @@
+ #undef __BSDI__
+ #define __BSDI__	1
+ #endif
++#if defined(__CYGWIN__)
++#undef __CYGWIN__
++#define __CYGWIN__	1
++#endif
+ #if defined(_arch_dreamcast)
+ #undef __DREAMCAST__
+ #define __DREAMCAST__	1
+Index: configure.in
+===================================================================
+--- configure.in	(revision 5319)
++++ configure.in	(working copy)
+@@ -2,7 +2,7 @@
+ AC_INIT(README)
+ AC_CONFIG_HEADER(include/SDL_config.h)
+ AC_GNU_SOURCE
+-AC_CONFIG_AUX_DIRS($srcdir/build-scripts)
++AC_CONFIG_AUX_DIR(build-scripts)
+ 
+ dnl Set various version strings - taken gratefully from the GTk sources
+ #
+@@ -44,7 +44,6 @@
+ AC_SUBST(LT_AGE)
+ 
+ dnl Detect the canonical build and host environments
+-AC_CONFIG_AUX_DIR([build-scripts])
+ dnl AC_CANONICAL_HOST
+ AC_C_BIGENDIAN
+ if test x$ac_cv_c_bigendian = xyes; then
+@@ -77,11 +76,6 @@
+     INCLUDE="-Iinclude $INCLUDE"
+ fi
+ case "$host" in
+-    *-*-cygwin*)
+-        # We build SDL on cygwin without the UNIX emulation layer
+-        BASE_CFLAGS="-I/usr/include/mingw -mno-cygwin"
+-        BASE_LDFLAGS="-mno-cygwin"
+-        ;;
+     *)
+         BASE_CFLAGS="-D_GNU_SOURCE=1"
+         BASE_LDFLAGS=""
+@@ -157,7 +151,7 @@
+ 
+     dnl Checks for library functions.
+     case "$host" in
+-    *-*-cygwin* | *-*-mingw32*)
++    *-*-mingw32*)
+         ;;
+     *)
+         AC_FUNC_ALLOCA
+@@ -730,7 +724,7 @@
+ 
+         if test x"$NASMFLAGS" = x; then
+             case $ARCH in
+-              win32)
++              win32|cygwin)
+                   NASMFLAGS="-f win32"
+                   ;;
+               openbsd)
+@@ -965,6 +959,13 @@
+                           , enable_x11_shared=maybe)
+ 
+             case "$host" in
++                *-*-cygwin*)
++                    x11_symbols_private=yes
++                    x11_lib='cygX11-6.dll'
++                    x11ext_lib='cygXext-6.dll'
++                    xrender_lib='cygXrender-1.dll'
++                    xrandr_lib='cygXrandr-2.dll'
++                    ;;
+                 *-*-darwin*) # Latest Mac OS X actually ships with Xrandr/Xrender libs...
+                     x11_symbols_private=yes
+                     x11_lib='/usr/X11R6/lib/libX11.6.dylib'
+@@ -2453,7 +2454,7 @@
+             have_timers=yes
+         fi
+         ;;
+-    *-*-cygwin* | *-*-mingw32*)
++    *-*-mingw32*)
+         ARCH=win32
+         if test "$build" != "$host"; then # cross-compiling
+             # Default cross-compile location
+@@ -2525,6 +2526,44 @@
+         SDL_CFLAGS="$SDL_CFLAGS -Dmain=SDL_main"
+         SDL_LIBS="-lmingw32 -lSDLmain $SDL_LIBS -mwindows"
+         ;;
++    *-*-cygwin*)
++        ARCH=cygwin
++        CheckDummyVideo
++        CheckDiskAudio
++        CheckDummyAudio
++        CheckDLOPEN
++        CheckNASM
++        CheckOSS
++        CheckARTSC
++        CheckESD
++        CheckNAS
++        CheckX11
++        CheckGGI
++        CheckAAlib
++        CheckCaca
++        CheckOpenGLX11
++        CheckPTHREAD
++        # Set up files for the joystick library
++        if test x$enable_joystick = xyes; then
++            AC_DEFINE(SDL_JOYSTICK_WINMM)
++            SOURCES="$SOURCES $srcdir/src/joystick/win32/*.c"
++            have_joystick=yes
++        fi
++        # Set up files for the cdrom library
++        if test x$enable_cdrom = xyes; then
++            AC_DEFINE(SDL_CDROM_WIN32)
++            SOURCES="$SOURCES $srcdir/src/cdrom/win32/*.c"
++            have_cdrom=yes
++        fi
++        # Set up files for the timer library
++        if test x$enable_timers = xyes; then
++            AC_DEFINE(SDL_TIMER_UNIX)
++            SOURCES="$SOURCES $srcdir/src/timer/unix/*.c"
++            have_timers=yes
++        fi
++        # Set up the system libraries we need
++        EXTRA_LDFLAGS="$EXTRA_LDFLAGS -lwinmm"
++        ;;
+     *-wince*)
+         ARCH=win32
+         CheckDummyVideo
